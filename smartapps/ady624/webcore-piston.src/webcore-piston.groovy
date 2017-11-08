@@ -18,8 +18,10 @@
  *
  *  Version history
 */
-public static String version() { return "v0.2.0fb.20171026" }
+public static String version() { return "v0.2.0fd.20171105" }
 /*
+ *	11/05/2017 >>> v0.2.0fd.20171105 - BETA M2 - Further DST fixes
+ *	11/05/2017 >>> v0.2.0fc.20171105 - BETA M2 - DST fixes
  *	10/26/2017 >>> v0.2.0fb.20171026 - BETA M2 - Partial support for super global variables - works within same location - no inter-location comms yet
  *	10/11/2017 >>> v0.2.0fa.20171010 - BETA M2 - Various bug fixes and improvements - fixed the mid() and random() functions
  *	10/07/2017 >>> v0.2.0f9.20171007 - BETA M2 - Added previous location attribute support and methods to calculate distance between places, people, fixed locations...
@@ -1777,12 +1779,14 @@ private scheduleTimer(rtData, timer, long lastRun = 0) {
         	//first run, just adjust the time so we're in the future
             while (time <= now()) {
             	//add days to bring it to next occurrence
-            	time += 86400000
+                //we need to go through local time to support DST
+                time = localToUtcTime(utcToLocalTime(time) + 86400000)
             }
         }
     }
     delta = delta * interval
     def priorActivity = !!lastRun
+    
     
     //switch to local date/times
     time = utcToLocalTime(time)
@@ -1799,6 +1803,7 @@ private scheduleTimer(rtData, timer, long lastRun = 0) {
     	long min = cast(rtData, timer.lo.om, 'long')
     	nextSchedule = (long) 3600000 * (Math.floor(nextSchedule / 3600000) - 1) + (min * 60000)
     }
+    
     //next date
 	int cycles = 100
     while (cycles) {
@@ -7167,6 +7172,12 @@ private getThreeAxisOrientation(value, getIndex = false) {
 	return value
 }
 
+private long getTimeToday(long time) {
+	long result = localToUtcTime(time + utcToLocalTime(getMidnightTime()))
+    //we need to adjust for time overlapping during DST changes
+    return result + time - (utcToLocalTime(result) % 86400000)
+}
+
 private cast(rtData, value, dataType, srcDataType = null) {
     //error "CASTING ($srcDataType) $value as $dataType", rtData
     //if (srcDataType == 'vector3') error "got x = $value.x", rtData
@@ -7307,11 +7318,11 @@ private cast(rtData, value, dataType, srcDataType = null) {
         	def n = localTime()
 			return utcToLocalTime((srcDataType == 'string') ? localToUtcTime(value) : cast(rtData, value, "long")) % 86400000
 		case "date":
-        	if ((srcDataType == 'time') && (value < 86400000)) value += getMidnightTime()
+        	if ((srcDataType == 'time') && (value < 86400000)) value = getTimeToday(value)
 			def d = utcToLocalTime((srcDataType == 'string') ? localToUtcTime(value) : cast(rtData, value, "long"))
             return localToUtcTime(d - (d % 86400000))
 		case "datetime":
-        	if ((srcDataType == 'time') && (value < 86400000)) value += getMidnightTime()
+        	if ((srcDataType == 'time') && (value < 86400000)) value = getTimeToday(value) //localToUtcTime(value + utcToLocalTime(getMidnightTime()))
 			return ((srcDataType == 'string') ? localToUtcTime(value) : cast(rtData, value, "long"))
 		case "vector3":
 			return (value instanceof Map) && (value.x != null) && (value.y != null) && (value.z != null) ? value : [x:0, y:0, z:0]
@@ -7681,7 +7692,7 @@ private initSunriseAndSunset(rtData) {
         	updated: now()
     	]
     }
-	rtData.sunrise = localToUtcTime(rightNow - rightNow.mod(86400000) + utcToLocalTime(rtData.sunTimes.sunrise).mod(86400000))
+    rtData.sunrise = localToUtcTime(rightNow - rightNow.mod(86400000) + utcToLocalTime(rtData.sunTimes.sunrise).mod(86400000))
 	rtData.sunset = localToUtcTime(rightNow - rightNow.mod(86400000) + utcToLocalTime(rtData.sunTimes.sunset).mod(86400000))    
 }
 
@@ -7711,8 +7722,8 @@ private getMidnightTime(rtData) {
 }
 
 private getNextMidnightTime(rtData) {
-	def rightNow = localTime()
-    return localToUtcTime(rightNow - rightNow.mod(86400000) + 86400000)
+	def rightNow = utcToLocalTime(localToUtcTime(localTime() + 86400000))
+    return localToUtcTime(rightNow - rightNow.mod(86400000))
 }
 
 private getNoonTime(rtData) {
@@ -7722,7 +7733,8 @@ private getNoonTime(rtData) {
 
 private getNextNoonTime(rtData) {
 	def rightNow = localTime()
-    return localToUtcTime(rightNow - rightNow.mod(86400000) + 43200000 + (rightNow.mod(86400000) >= 43200000 ? 86400000 : 0))
+	rightNow = utcToLocalTime(localToUtcTime(rightNow + (rightNow.mod(86400000) >= 43200000 ? 86400000 : 0)))
+    return localToUtcTime(rightNow - rightNow.mod(86400000) + 43200000)
 }
 
 private Map getLocalVariables(rtData, vars) {
